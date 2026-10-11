@@ -22,12 +22,18 @@ export const MISSIONS: readonly Mission[] = [
   mission('Doomsday Machine Mission', 20_000, 1_250_000, 9, step('out', 3, 'Pass the out-lanes')),
   mission('Time Warp Mission', 30_000, 2_000_000, 12, step('rebound', 25, 'Hit rebounds'), step('timeWarp', 1, 'Ramp to promote; hyperspace to demote')),
   mission('Maelstrom', 30_000, 5_000_000, 18, step('drop', 3, 'Hit drop targets'), step('spot', 3, 'Hit spot targets'), step('lane', 5, 'Pass lanes'), step('fuel', 1, 'Reach the top fuel rollover'), step('ramp', 1, 'Pass the launch ramp'), step('flags', 1, 'Spin a flag'), step('wormhole', 1, 'Enter a wormhole'), step('hyperspace', 1, 'Hyperspace to end Maelstrom')),
+  mission('Bumper Squadron', 20_000, 1_250_000, 9, step('bumper', 12, 'Clear the attack bumper field')),
+  mission('Wormhole Survey', 20_000, 1_500_000, 10, step('yellow', 1, 'Survey the yellow wormhole'), step('red', 1, 'Survey the red wormhole'), step('green', 1, 'Survey the green wormhole')),
+  mission('Reactor Run', 20_000, 1_500_000, 10, step('drop', 6, 'Clear two drop banks'), step('bumper', 10, 'Charge the attack bumpers')),
 ]
 
 export function missionsForRank(rank: number): readonly number[] {
   if (rank === 0) return [0, 1, 2, 3]
-  if (rank < 3) return [4, 5, 6, 7]
-  if (rank < 5) return [8, 9, 10, 11]
-  if (rank < 7) return [12, 13, 14, 15]
+  if (rank === 1) return [4, 5, 6, 7]
+  if (rank === 2) return [4, 5, 17, 7]
+  if (rank === 3) return [8, 9, 10, 11]
+  if (rank === 4) return [8, 18, 10, 11]
+  if (rank === 5) return [12, 13, 14, 15]
+  if (rank === 6) return [12, 13, 19, 15]
   return [11, 7, 15, 16]
 }

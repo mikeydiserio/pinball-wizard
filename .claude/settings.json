@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(pnpm vitest *)",
-      "Bash(sed -i 's/z: bumper.z + 0.6, vx: 0, vz: -15/z: bumper.z + 0.56, vx: 0, vz: -15/' src/boards/spaceCadet/game.test.ts)"
+      "Bash(sed -i 's/z: bumper.z + 0.6, vx: 0, vz: -15/z: bumper.z + 0.56, vx: 0, vz: -15/' src/boards/spaceCadet/game.test.ts)",
+      "Bash(sed -E \"s/.*'\\([a-zA-Z]+\\)'/\\\\1/\")",
+      "Bash(ls)",
+      "Bash(python -I -c ' *)",
+      "Bash(sed -i \\\\ *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Mikey\\Documents\\pinball\\src"
     ]
   }
 }

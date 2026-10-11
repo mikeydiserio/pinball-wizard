@@ -3,7 +3,7 @@ import type { MeshStandardMaterial } from 'three'
 import type { SpaceCadetGame } from './game'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, DoubleSide, ExtrudeGeometry, Shape, SRGBColorSpace, TubeGeometry, Vector3 } from 'three'
-import { DECK_OUTLINE, DECK_RAILS, DECK_Y, ORBIT_CANOPY, RAMP_PATH, RAMP_WIDTH, type Vec2, type Vec3 } from './layout'
+import { DECK_OUTLINE, DECK_RAILS, DECK_Y, HYPERSPACE_CHUTE, HYPERSPACE_CHUTE_WIDTH, HYPERSPACE_HOOD, RAMP_PATH, RAMP_WIDTH, SAUCERS, type Vec2, type Vec3 } from './layout'
 
 function polygonGeometry(points: readonly Vec2[], depth: number) {
   const shape = new Shape()
@@ -91,26 +91,35 @@ export function LaunchDeck({ game }: { game: SpaceCadetGame }) {
   </group>
 }
 
-export function OrbitCanopy() {
+const HYPERSPACE_EJECT = SAUCERS.find(saucer => saucer.kind === 'hyperspace')!.eject
+
+/** Hyperspace chute (30): a clear tube up the right side ending in the hooded kickout (27). */
+export function HyperspaceChute() {
   const parts=useMemo(()=>{
-    const curve=new CatmullRomCurve3(ORBIT_CANOPY.map(p=>new Vector3(...p)))
-    const path=curve.getPoints(100)
-    const sidePaths=[-.29,.29].map(offset=>path.map((p,i):Vec3=>{
-      const tangent=curve.getTangent(i/100)
-      return [p.x-tangent.z*offset,p.y,p.z+tangent.x*offset]
-    }))
-    return { strips:sidePaths.map(p=>ribbon(p,.23,.035)), braces:[0,.16,.33,.5,.67,.84,1].map(t=>({p:curve.getPoint(t),angle:Math.atan2(-curve.getTangent(t).z,curve.getTangent(t).x)})) }
+    const track=ribbon(HYPERSPACE_CHUTE,HYPERSPACE_CHUTE_WIDTH,.2)
+    const curve=new CatmullRomCurve3(HYPERSPACE_CHUTE.map(p=>new Vector3(...p)))
+    const braces=[.3,.5,.7,.88].map(t=>{ const p=curve.getPoint(t), d=curve.getTangent(t); return { p, angle: Math.atan2(-d.z,d.x) } })
+    return { track, braces }
   },[])
-  useEffect(()=>()=>parts.strips.forEach(s=>{s.floor.dispose();s.walls.forEach(g=>g.dispose());s.rails.forEach(g=>g.dispose())}),[parts])
+  useEffect(()=>()=>{ parts.track.floor.dispose(); parts.track.walls.forEach(g=>g.dispose()); parts.track.rails.forEach(g=>g.dispose()) },[parts])
+  // Leave the hood open toward the eject direction only.
+  const opening=Math.atan2(HYPERSPACE_EJECT[0],HYPERSPACE_EJECT[1]), gap=1.7
   return <group>
-    {parts.strips.map((s,i)=><group key={i}>
-      <mesh geometry={s.floor} castShadow><meshStandardMaterial color="#452b37" side={DoubleSide} roughness={.48}/></mesh>
-      {s.walls.map((g,j)=><mesh key={j} geometry={g}><meshStandardMaterial color="#bc414c" side={DoubleSide}/></mesh>)}
-      {s.rails.map((g,j)=><mesh key={j} geometry={g}><meshStandardMaterial color="#b84047" roughness={.4}/></mesh>)}
-    </group>)}
-    {parts.braces.map(({p,angle},i)=><mesh key={i} position={[p.x,p.y+.09,p.z]} rotation={[0,angle+Math.PI/2,0]} castShadow>
-      <boxGeometry args={[.74,.07,.1]}/><meshStandardMaterial color={i===0 || i===6 ? '#be5050':'#224ba1'} roughness={.36}/>
+    <mesh geometry={parts.track.floor} receiveShadow><meshStandardMaterial color="#9fd6ff" transparent opacity={.32} side={DoubleSide} roughness={.15} depthWrite={false}/></mesh>
+    {parts.track.walls.map((g,i)=><mesh key={i} geometry={g}><meshStandardMaterial color="#bc414c" transparent opacity={.55} side={DoubleSide} roughness={.3} depthWrite={false}/></mesh>)}
+    {parts.track.rails.map((g,i)=><mesh key={i} geometry={g}><meshStandardMaterial color="#d3d6de" metalness={.65} roughness={.26}/></mesh>)}
+    {parts.braces.map(({p,angle},i)=><mesh key={i} position={[p.x,p.y+.22,p.z]} rotation={[0,angle+Math.PI/2,0]} castShadow>
+      <boxGeometry args={[HYPERSPACE_CHUTE_WIDTH+.12,.05,.08]}/><meshStandardMaterial color="#224ba1" roughness={.36}/>
     </mesh>)}
+    <group position={[HYPERSPACE_HOOD.x,0,HYPERSPACE_HOOD.z]}>
+      <mesh position={[0,.02,0]}>
+        <sphereGeometry args={[HYPERSPACE_HOOD.radius,32,12,opening+gap/2,Math.PI*2-gap,0,Math.PI/2]}/>
+        <meshStandardMaterial color="#8d5bd6" transparent opacity={.5} side={DoubleSide} roughness={.2} depthWrite={false}/>
+      </mesh>
+      <mesh position={[0,.025,0]} rotation={[-Math.PI/2,0,0]}>
+        <torusGeometry args={[HYPERSPACE_HOOD.radius,.025,8,40]}/><meshStandardMaterial color="#d3d6de" metalness={1} roughness={.2}/>
+      </mesh>
+    </group>
   </group>
 }
 

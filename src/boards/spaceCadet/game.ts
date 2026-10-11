@@ -3,8 +3,8 @@ export { MISSIONS } from './missions'
 import type { TableGame, TableSnapshot } from '../../game/table'
 import {
   BALL_RADIUS, BALL_Y, BUMPERS, CENTER_POST, DRAIN_Z, DROPS, FLIPPER, GRAVITY_WELL, KICKERS, OUTLANE_DRAIN_Z,
-  DECK_Y, DECK_RAILS, onLaunchDeck, RAMP_ENTRY, RAMP_PATH, ROLLOVERS, SAUCERS, SEGMENTS, SERVE, SPINNERS, TABLE, TARGETS, WORMHOLES,
-  isOutlane, type LightKey, type Segment, type Vec3,
+  DECK_Y, DECK_RAILS, HYPERSPACE_CHUTE, HYPERSPACE_HOOD, inHyperspaceMouth, LANE_DIR, laneCoords, onLaunchDeck, RAMP_ENTRY, RAMP_PATH,
+  ROLLOVERS, SAUCERS, SEGMENTS, SERVE, SPINNERS, TABLE, TARGETS, WORMHOLES, isOutlane, type LightKey, type Segment, type Vec3,
 } from './layout'
 
 export type CadetEventType =
@@ -34,6 +34,7 @@ export type CadetSnapshot = TableSnapshot & Readonly<{
 
 type Capture =
   | { kind: 'ramp'; distance: number; speed: number }
+  | { kind: 'chute'; distance: number; speed: number; dx: number; dz: number }
   | { kind: 'saucer'; index: number; until: number }
   | { kind: 'wormhole'; from: number; to: number; phase: 'sink' | 'rise'; until: number }
   | { kind: 'well'; until: number }
@@ -49,26 +50,29 @@ const MULTIPLIERS = [1, 2, 3, 5, 10]
 const SKILL_AWARDS = [15_000, 30_000, 75_000, 30_000, 15_000, 7_500]
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
-/** Precomputed arc-length table for the elevated launch ramp. */
-const RAMP = (() => {
+/** Arc-length table for an elevated track the ball rides while captured. */
+function track(path: readonly Vec3[]) {
   const lengths = [0]
-  for (let i = 1; i < RAMP_PATH.length; i++) {
-    const [ax, ay, az] = RAMP_PATH[i - 1]
-    const [bx, by, bz] = RAMP_PATH[i]
+  for (let i = 1; i < path.length; i++) {
+    const [ax, ay, az] = path[i - 1]
+    const [bx, by, bz] = path[i]
     lengths.push(lengths[i - 1] + Math.hypot(bx - ax, by - ay, bz - az))
   }
-  return { lengths, total: lengths[lengths.length - 1] }
-})()
-
-export function sampleRamp(distance: number): Vec3 {
-  const d = clamp(distance, 0, RAMP.total)
-  let i = 1
-  while (i < RAMP.lengths.length - 1 && RAMP.lengths[i] < d) i++
-  const t = (d - RAMP.lengths[i - 1]) / (RAMP.lengths[i] - RAMP.lengths[i - 1] || 1)
-  const a = RAMP_PATH[i - 1]
-  const b = RAMP_PATH[i]
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+  const total = lengths[lengths.length - 1]
+  const sample = (distance: number): Vec3 => {
+    const d = clamp(distance, 0, total)
+    let i = 1
+    while (i < lengths.length - 1 && lengths[i] < d) i++
+    const t = (d - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1)
+    const a = path[i - 1]
+    const b = path[i]
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+  }
+  return { total, sample }
 }
+const RAMP = track(RAMP_PATH)
+const CHUTE = track(HYPERSPACE_CHUTE)
+export const sampleRamp = RAMP.sample
 
 interface BallState {
   capture: Capture | null
@@ -252,6 +256,7 @@ export class SpaceCadetGame implements TableGame {
       case 'redeploy': return s.ballSave ? (this.saveUntil - this.elapsed < 3 ? blink(8) : 1) : 0
       case 'gravity': return this.gravityActive ? blink(3) : 0
       case 'centerPost': return this.centerPostUp ? this.centerPostUntil - this.elapsed < 3 ? blink(5) : 1 : 0
+      case 'bumper': return this.bumperFlashes[index] ?? 0
       case 'missionArrow': {
         if (s.mission === null) return 0
         const step = MISSIONS[s.mission].steps[s.missionStage]
@@ -560,6 +565,7 @@ export class SpaceCadetGame implements TableGame {
       if (ground) TARGETS.forEach((_, i) => this.collideTarget(i))
       if (ground) DROPS.forEach((_, i) => this.collideDrop(i))
       if (ground && this.centerPostUp) this.collidePost(CENTER_POST.x, CENTER_POST.z, CENTER_POST.radius, 0.5)
+      if (ground) this.collidePost(HYPERSPACE_HOOD.x, HYPERSPACE_HOOD.z, HYPERSPACE_HOOD.radius, 0.5)
     }
 
     if (ground) {
@@ -950,9 +956,18 @@ export class SpaceCadetGame implements TableGame {
       this.emit('ramp', ball.x, ball.z)
       return
     }
+    const [u, v] = laneCoords(ball.x, ball.z)
+    const upLane = ball.vx * LANE_DIR[0] + ball.vz * LANE_DIR[1]
+    if (!captureBusy && inHyperspaceMouth(u, v) && upLane > 2) {
+      const [sx, , sz] = HYPERSPACE_CHUTE[0]
+      this.capture = { kind: 'chute', distance: 0, speed: clamp(upLane * 0.8, 6, 10), dx: ball.x - sx, dz: ball.z - sz }
+      this.emit('ramp', ball.x, ball.z)
+      return
+    }
     for (let i = 0; i < SAUCERS.length; i++) {
       const saucer = SAUCERS[i]
-      if (Math.hypot(ball.x - saucer.x, ball.z - saucer.z) < saucer.radius && speed < (saucer.kind === 'hyperspace' ? 20 : 14) && !captureBusy) {
+      if (saucer.kind === 'hyperspace') continue
+      if (Math.hypot(ball.x - saucer.x, ball.z - saucer.z) < saucer.radius && speed < 14 && !captureBusy) {
         this.capture = { kind: 'saucer', index: i, until: this.elapsed + 1.1 }
         this.saucerFlashes[i] = 1
         this.emit('kickout', saucer.x, saucer.z)
@@ -1048,6 +1063,27 @@ export class SpaceCadetGame implements TableGame {
       this.currentState.verticalSpeed = 0
       return
     }
+    if (capture.kind === 'chute') {
+      // Ease from where the ball entered the funnel onto the chute's centerline.
+      const along = (d: number): Vec3 => {
+        const [x, y, z] = CHUTE.sample(d), fade = Math.max(0, 1 - d / .7)
+        return [x + capture.dx * fade, y, z + capture.dz * fade]
+      }
+      const before = along(capture.distance)
+      capture.distance += capture.speed * dt
+      const [x, y, z] = along(capture.distance)
+      ball.vx = (x - before[0]) / dt
+      ball.vz = (z - before[2]) / dt
+      Object.assign(ball, { x, y: BALL_Y + y, z })
+      if (capture.distance < CHUTE.total) return
+      // The chute drops straight into the hooded hyperspace kickout.
+      const index = SAUCERS.findIndex(saucer => saucer.kind === 'hyperspace')
+      this.capture = { kind: 'saucer', index, until: this.elapsed + 1.1 }
+      this.saucerFlashes[index] = 1
+      this.emit('kickout', SAUCERS[index].x, SAUCERS[index].z)
+      this.awardSaucer(index)
+      return
+    }
     if (capture.kind === 'saucer') {
       const saucer = SAUCERS[capture.index]
       ball.x += (saucer.x - ball.x) * Math.min(1, dt * 14)
@@ -1064,10 +1100,17 @@ export class SpaceCadetGame implements TableGame {
         vx = saucer.eject[0] + (this.random() - .5) * .6
         vz = saucer.eject[1]
       }
-      if (saucer.kind === 'hyperspace') this.hyperReflexUntil = this.elapsed + 8
-      Object.assign(ball, { x: saucer.x, y: BALL_Y, z: saucer.z, vx, vz })
+      let x: number = saucer.x, z: number = saucer.z
+      if (saucer.kind === 'hyperspace') {
+        this.hyperReflexUntil = this.elapsed + 8
+        // Leave through the hood's open side rather than inside its collider.
+        const out = (HYPERSPACE_HOOD.radius + BALL_RADIUS + .03) / Math.hypot(vx, vz)
+        x += vx * out; z += vz * out
+      }
+      Object.assign(ball, { x, y: BALL_Y, z, vx, vz })
       this.emit('kickout', saucer.x, saucer.z)
-      this.release(0.6)
+      // Give the ball room to clear the right orbit before another chute capture.
+      this.release(saucer.kind === 'hyperspace' ? 1.1 : 0.6)
       return
     }
     if (capture.kind === 'wormhole') {

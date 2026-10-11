@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SpaceCadetGame, MISSIONS } from './game'
-import { BALL_Y, DECK_Y, DECK_RAILS, BUMPERS, DROPS, KICKERS, RAMP_ENTRY, RAMP_PATH, SERVE, TABLE, TARGETS, WORMHOLES } from './layout'
+import { BALL_Y, DECK_Y, DECK_RAILS, BUMPERS, DROPS, HYPERSPACE_HOOD, KICKERS, LANE_DIR, RAMP_ENTRY, RAMP_PATH, SERVE, TABLE, TARGETS, WORMHOLES, hyperspaceLane } from './layout'
 
 function advance(game: SpaceCadetGame, seconds: number, hz = 240) {
   for (let i = 0; i < Math.round(seconds * hz); i++) game.update(1 / hz)
@@ -279,5 +279,68 @@ describe('space cadet table', () => {
     game.newGame()
     expect(game.getSnapshot()).toMatchObject({ status: 'ready', score: 0, ballNumber: 1, rank: 0, mission: null, launchReady: true })
     expect(game.ball).toMatchObject({ x: SERVE.x, z: SERVE.z, vx: 0, vz: 0 })
+  })
+})
+
+describe('hyperspace chute', () => {
+  it.each([0.3, 0.6, 0.9, 1])('keeps a %s-charge plunger launch out of the hooded kickout', charge => {
+    const game = new SpaceCadetGame()
+    launch(game, charge)
+    for (let i = 0; i < 240 * 4; i++) {
+      game.update(1 / 240)
+      expect(game['capture']?.kind).not.toBe('chute')
+    }
+    expect(game.getSnapshot().hyperspace).toBe(0)
+  })
+
+  it('bounces a playfield ball off the hood instead of capturing it', () => {
+    const game = new SpaceCadetGame()
+    launchWithoutSave(game)
+    Object.assign(game.ball, { x: HYPERSPACE_HOOD.x, y: BALL_Y, z: HYPERSPACE_HOOD.z - .6, vx: 0, vz: 3 })
+    advance(game, .5)
+    expect(game.getSnapshot().hyperspace).toBe(0)
+    expect(Math.hypot(game.ball.x - HYPERSPACE_HOOD.x, game.ball.z - HYPERSPACE_HOOD.z)).toBeGreaterThan(HYPERSPACE_HOOD.radius + .1)
+  })
+
+  it('carries a lane shot up the chute into the kickout and ejects it outside the hood', () => {
+    const game = new SpaceCadetGame()
+    launchWithoutSave(game)
+    const [x, z] = hyperspaceLane(1.4, .3)
+    Object.assign(game.ball, { x, y: BALL_Y, z, vx: LANE_DIR[0] * 9, vz: LANE_DIR[1] * 9 })
+    let rode = false
+    for (let i = 0; i < 240 * 3 && game.getSnapshot().hyperspace === 0; i++) {
+      game.update(1 / 240)
+      if (game['capture']?.kind === 'chute') rode = true
+    }
+    expect(rode).toBe(true)
+    expect(game.getSnapshot().hyperspace).toBe(1)
+    advance(game, 1.2)
+    expect(game['capture']).toBeNull()
+    expect(Math.hypot(game.ball.x - HYPERSPACE_HOOD.x, game.ball.z - HYPERSPACE_HOOD.z)).toBeGreaterThan(HYPERSPACE_HOOD.radius)
+  })
+
+  it('takes a late left-flipper shot up the funnel', () => {
+    let entered = 0
+    for (const delay of [.44, .47, .5, .53, .56, .59, .62, .65]) {
+      const game = new SpaceCadetGame()
+      launch(game)
+      advance(game, .1)
+      game['currentState'].deploying = false
+      Object.assign(game.ball, { x: -2.0, y: BALL_Y, z: 4.45, vx: 1.6, vz: 0.9 })
+      for (let t = 0; t < 1.5 && game['capture']?.kind !== 'chute'; t += 1 / 240) {
+        game.setFlipper('left', t > delay && t < delay + .25)
+        game.update(1 / 240)
+      }
+      if (game['capture']?.kind === 'chute') entered++
+    }
+    expect(entered).toBeGreaterThanOrEqual(6)
+  })
+
+  it('ignores a ball crossing the mouth sideways', () => {
+    const game = new SpaceCadetGame()
+    launchWithoutSave(game)
+    const [x, z] = hyperspaceLane(2.85, -.2)
+    Object.assign(game.ball, { x, y: BALL_Y, z, vx: -LANE_DIR[1] * 6, vz: LANE_DIR[0] * 6 })
+    for (let i = 0; i < 60; i++) { game.update(1 / 240); expect(game['capture']?.kind).not.toBe('chute') }
   })
 })

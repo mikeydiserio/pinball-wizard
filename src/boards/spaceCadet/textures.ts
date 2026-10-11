@@ -1,5 +1,5 @@
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three'
-import { ARC_SEGMENTS, GRAVITY_WELL, INSERTS, ROLLOVERS, SLINGS, TABLE, type Vec2 } from './layout'
+import { ARC_SEGMENTS, GRAVITY_WELL, HYPERSPACE_BOLT, INSERTS, ROLLOVERS, SLINGS, TABLE, type Vec2 } from './layout'
 
 const SCALE = 300
 const WIDTH = (TABLE.right - TABLE.left) * SCALE
@@ -44,20 +44,12 @@ export function createCadetPlayfield() {
     ctx.strokeStyle = '#486f7b'; ctx.lineWidth = s(.023 + random() * .016); ctx.stroke()
   }
   for (let i = 0; i < 90; i++) circle(-3.3 + random() * 6.5, -6 + random() * 5, .004 + random() * .007, '#81899e', '#81899e')
-  // Rocket and launch streak on the left, meteor field on the right.
+  // Rocket and launch streak on the left, dice and the hyperspace bolt on the right.
   polygon([[-2.56,-1.35],[-2.07,-1.61],[-1.5,.58],[-1.76,.75],[-1.7,1.0],[-1.99,.84]], '#b36cba', '#99d8e0', .045)
   drawShuttle(ctx, x(-1.5), z(-1.95), s(.8), -.35)
-  for (let i = 0; i < 5; i++) {
-    const cx = .82 + Math.sin(i * 2) * .23, cz = -2.0 + i * .38
-    const points: Vec2[] = Array.from({length: 13}, (_, j) => {
-      const angle = j / 13 * Math.PI * 2, r = .18 + random() * .12
-      return [cx + Math.cos(angle) * r, cz + Math.sin(angle) * r]
-    })
-    polygon(points, '#a09b88', '#90bed0', .05)
-    for (let j = 0; j < 7; j++) circle(cx + (random() - .5) * .26, cz + (random() - .5) * .25, .014 + random() * .02, '#505553')
-  }
-  polygon([[.58,1.0],[.66,.66],[.5,.73],[.79,.21],[.66,.23],[1.0,-.25],[.88,-.26],[1.62,-1.04],[1.33,-.26],[1.46,-.31],[1.09,.27],[1.22,.2],[.91,.9],[.72,1.15]], '#c73647', '#a4dbeb', .055)
-  for (let i = 0; i < 3; i++) polygon([[.83+i*.18,.65-i*.43],[1.02+i*.18,.35-i*.43],[1.04+i*.18,.69-i*.43]], '#163d80')
+  const DICE = [[.62, -2.22, .35, 5], [.86, -1.8, -.3, 2], [.6, -1.38, .55, 6], [.88, -.98, -.15, 3]] as const
+  for (const [cx, cz, angle, face] of DICE) drawDie(ctx, x(cx), z(cz), s(.27), angle, face)
+  polygon(HYPERSPACE_BOLT, '#c73647', '#a4dbeb', .055)
   // Orange impact cloud behind the launch trajectory.
   const cloud: Vec2[] = Array.from({length: 30}, (_, i) => {
     const a = i / 30 * Math.PI * 2, r = .45 + random() * .16
@@ -90,17 +82,8 @@ export function createCadetPlayfield() {
     ctx.fillStyle = '#222b37'; ctx.fillRect(x(r.x-.028),z(r.z-.125),s(.056),s(.25))
     circle(r.x, r.z-.31, .105, '#b58917')
   })
-  for (const points of [SLINGS.left, SLINGS.right]) {
-    polygon(points, '#20294a', '#b53e49', .08)
-    const [top,, inner] = points
-    for (let n = 0; n < 3; n++) {
-      ctx.beginPath(); ctx.moveTo(x(top[0]),z(top[1]+.13+n*.23))
-      ctx.lineTo(x(top[0]+(inner[0]-top[0])*.3),z(top[1]+.4+n*.25))
-      ctx.lineTo(x(top[0]+(inner[0]-top[0])*.18),z(top[1]+.57+n*.25))
-      ctx.lineTo(x(inner[0]),z(inner[1]-.2))
-      ctx.strokeStyle = '#9adbe9'; ctx.lineWidth=s(.026); ctx.shadowColor='#64d5ff'; ctx.shadowBlur=12; ctx.stroke(); ctx.shadowBlur=0
-    }
-  }
+  // Sling bolts live on the raised caps (SpaceCadetTable), which cover this print.
+  for (const points of [SLINGS.left, SLINGS.right]) polygon(points, '#20294a', '#b53e49', .08)
   // The characteristic purple three-pronged flare around the flippers.
   polygon([[-1.7,5.85],[-2.35,4.53],[-1.09,4.91],[-1.38,3.37],[-.49,4.56],[-.25,3.81],[.03,4.56],[.65,3.36],[.63,4.96],[1.86,4.54],[1.18,5.85]], '#9f69ae', '#362145', .045)
   polygon([[-.62,4.57],[-1.17,3.63],[-.77,4.96],[-.34,5.52],[.32,4.9],[.52,3.65],[-.04,4.58],[-.25,4.15]], '#5743a2', '#453565')
@@ -149,6 +132,30 @@ export function createCadetApronTexture(right: boolean) {
   texture.colorSpace = SRGBColorSpace
   texture.anisotropy = 8
   return texture
+}
+
+const PIPS: Record<number, readonly Vec2[]> = {
+  1: [[0, 0]],
+  2: [[-1, -1], [1, 1]],
+  3: [[-1, -1], [0, 0], [1, 1]],
+  4: [[-1, -1], [1, -1], [-1, 1], [1, 1]],
+  5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]],
+  6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]],
+}
+
+function drawDie(ctx: CanvasRenderingContext2D, cx: number, cz: number, side: number, rotation: number, face: number) {
+  ctx.save()
+  ctx.translate(cx, cz)
+  ctx.rotate(rotation)
+  const half = side / 2
+  ctx.beginPath(); ctx.roundRect(-half, -half, side, side, side * .18)
+  ctx.fillStyle = '#e9e4cf'; ctx.fill()
+  ctx.lineWidth = side * .07; ctx.strokeStyle = '#90bed0'; ctx.stroke()
+  ctx.fillStyle = '#2b2f3a'
+  for (const [px, pz] of PIPS[face]) {
+    ctx.beginPath(); ctx.arc(px * side * .27, pz * side * .27, side * .085, 0, Math.PI * 2); ctx.fill()
+  }
+  ctx.restore()
 }
 
 function drawShuttle(ctx: CanvasRenderingContext2D, cx: number, cz: number, length: number, rotation: number) {

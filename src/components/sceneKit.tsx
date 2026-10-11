@@ -6,7 +6,7 @@ import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
 
 type Quality = 'high' | 'balanced'
-type Variant = 'orbital' | 'cadet'
+type Variant = 'orbital' | 'cadet' | 'volcano'
 export interface SceneBall { x: number; y?: number; z: number; vx: number; vz: number }
 export interface SceneEvent { type: string; x: number; z: number; value?: number }
 type BallSource = () => readonly SceneBall[]
@@ -103,7 +103,7 @@ export function CameraRig({ mode, shake, getBalls, width, depth, centerZ }: {
 
 const SHAKE: Record<string, number> = {
   nudge: 0.07, bumper: 0.018, kicker: 0.02, sling: 0.012, ramp: 0.02, wormhole: 0.02,
-  mission: 0.04, hyperspace: 0.04, multiball: 0.04, jackpot: 0.04, rank: 0.06, drain: 0.02,
+  mission: 0.04, hyperspace: 0.04, multiball: 0.04, jackpot: 0.04, rank: 0.06, drain: 0.02, eruption: 0.07,
 }
 
 export function useTimeScale() {
@@ -120,27 +120,34 @@ export function useTimeScale() {
     impact(event: SceneEvent) {
       if (reducedMotion) return
       shake.current = Math.max(shake.current, SHAKE[event.type] ?? (event.type === 'flipper' && (event.value ?? 0) > 8 ? 0.01 : 0))
-      if (['rank', 'jackpot', 'multiball'].includes(event.type)) remaining.current = 0.25
+      if (['rank', 'jackpot', 'multiball', 'eruption'].includes(event.type)) remaining.current = 0.25
     },
   }
 }
 
+/** Per-table light rig: sky, fill, rim spot, and the two tinted environment strips. */
+const LIGHT_RIGS: Record<Variant, { sky: string; ground: string; key: string; fill: string; spot: string; strip: string; front: string }> = {
+  orbital: { sky: '#cdd5ce', ground: '#454335', key: '#fff0cf', fill: '#b6d8d0', spot: '#ffc288', strip: '#e8f2eb', front: '#ffc78f' },
+  cadet: { sky: '#c9d4ff', ground: '#2a2445', key: '#f2f0ff', fill: '#9fb4ff', spot: '#c38bff', strip: '#b9a6ff', front: '#99b9ff' },
+  volcano: { sky: '#ffd2b0', ground: '#3a160b', key: '#fff0dc', fill: '#ff9a5c', spot: '#ff5a1f', strip: '#ffb07a', front: '#ff8a4a' },
+}
+
 export function StudioLights({ quality, variant, width, depth }: { quality: Quality; variant: Variant; width: number; depth: number }) {
-  const cadet = variant === 'cadet'
+  const rig = LIGHT_RIGS[variant]
   return <>
     <ambientLight intensity={0.25} />
-    <hemisphereLight args={[cadet ? '#c9d4ff' : '#cdd5ce', cadet ? '#2a2445' : '#454335', 0.65]} />
-    <directionalLight position={[-3.5, 10, 3]} color={cadet ? '#f2f0ff' : '#fff0cf'} intensity={1.7} castShadow
+    <hemisphereLight args={[rig.sky, rig.ground, 0.65]} />
+    <directionalLight position={[-3.5, 10, 3]} color={rig.key} intensity={1.7} castShadow
       shadow-mapSize={[quality === 'high' ? 2048 : 1024, quality === 'high' ? 2048 : 1024]}
       shadow-camera-left={-5} shadow-camera-right={5} shadow-camera-top={8} shadow-camera-bottom={-8}
       shadow-camera-near={0.5} shadow-camera-far={25} shadow-normalBias={0.012} shadow-bias={-0.0001} />
-    <directionalLight position={[4, 5, -4]} color={cadet ? '#9fb4ff' : '#b6d8d0'} intensity={0.55} />
-    <spotLight position={[0, 6, -6]} color={cadet ? '#c38bff' : '#ffc288'} intensity={14} angle={0.75} penumbra={1} distance={22} />
+    <directionalLight position={[4, 5, -4]} color={rig.fill} intensity={0.55} />
+    <spotLight position={[0, 6, -6]} color={rig.spot} intensity={14} angle={0.75} penumbra={1} distance={22} />
     <Environment resolution={256} frames={1} environmentIntensity={0.3}>
       <Lightformer form="rect" intensity={3} position={[0, 7, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[4, 13, 1]} />
       <Lightformer form="rect" intensity={4} position={[-5, 3, 0]} rotation={[0, Math.PI / 2, 0]} scale={[1.8, 9, 1]} />
-      <Lightformer form="rect" color={cadet ? '#b9a6ff' : '#e8f2eb'} intensity={1.1} position={[5, 4, -2]} rotation={[0, -Math.PI / 2, 0]} scale={[2, 11, 1]} />
-      <Lightformer form="rect" color={cadet ? '#99b9ff' : '#ffc78f'} intensity={2} position={[0, 4, 8]} rotation={[0, Math.PI, 0]} scale={[7, 2, 1]} />
+      <Lightformer form="rect" color={rig.strip} intensity={1.1} position={[5, 4, -2]} rotation={[0, -Math.PI / 2, 0]} scale={[2, 11, 1]} />
+      <Lightformer form="rect" color={rig.front} intensity={2} position={[0, 4, 8]} rotation={[0, Math.PI, 0]} scale={[7, 2, 1]} />
       <Lightformer form="ring" intensity={2} position={[0, 5, -9]} scale={4} />
     </Environment>
     <ContactShadows position={[0, -0.8, 0]} scale={[width + 2, depth + 2]} blur={2.5} opacity={0.55} far={2} resolution={512} frames={1} color="#000000" />
@@ -329,7 +336,7 @@ export function PostFX({ quality, variant }: { quality: Quality; variant: Varian
   }, [gl, quality])
   if (quality !== 'high') return null
   return <EffectComposer multisampling={4}>
-    <Bloom intensity={variant === 'cadet' ? 0.7 : 0.55} luminanceThreshold={0.7} luminanceSmoothing={0.4} mipmapBlur radius={0.6} />
+    <Bloom intensity={variant === 'orbital' ? 0.55 : variant === 'cadet' ? 0.7 : 0.8} luminanceThreshold={0.7} luminanceSmoothing={0.4} mipmapBlur radius={0.6} />
     <Vignette offset={0.3} darkness={0.55} />
     <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
   </EffectComposer>

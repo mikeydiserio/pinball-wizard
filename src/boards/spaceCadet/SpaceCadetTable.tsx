@@ -8,11 +8,11 @@ import {
 import type { SpaceCadetGame } from './game'
 import {
   BUMPERS, CENTER_POST, DROPS, INSERTS, KICKERS, ROLLOVERS, SAUCERS, SEGMENTS,
-  SERVE, SLINGS, SPINNERS, TABLE, TARGETS, WORMHOLES, type Insert, type Segment, type Vec2,
+  SERVE, SLINGS, SPINNERS, TABLE, TARGETS, WORMHOLES, slingBolt, type Insert, type Segment, type Vec2,
 } from './layout'
 import { createCadetBumperTexture, createCadetPlayfield, createVortexTexture } from './textures'
 
-import { LaunchDeck, LaunchRamp, OrbitCanopy, TargetShields } from './RaisedHardware'
+import { HyperspaceChute, LaunchDeck, LaunchRamp, TargetShields } from './RaisedHardware'
 import { createGlassSheenTexture, createLampHaloTexture } from '../../components/tableTextures'
 
 const ORANGE = '#b63740'
@@ -110,18 +110,8 @@ function Slingshot({ game, side }: { game: SpaceCadetGame; side: 0 | 1 }) {
     return new ExtrudeGeometry(shape, { depth: 0.16, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2 })
   }, [side])
   const lightning = useMemo(() => {
-    const points = side === 0 ? SLINGS.left : SLINGS.right
-    const [top, , inner] = points
-    return [0, 1].map(n => {
-      const sx = top[0] + (inner[0] - top[0]) * .12
-      const path = [
-        new Vector3(sx,.236,top[1]+.25+n*.23),
-        new Vector3(sx+(inner[0]-top[0])*.3,.236,top[1]+.55+n*.23),
-        new Vector3(sx+(inner[0]-top[0])*.1,.236,top[1]+.73+n*.23),
-        new Vector3(inner[0]-(inner[0]-top[0])*.23,.236,inner[1]-.33),
-      ]
-      return new TubeGeometry(new CatmullRomCurve3(path, false, 'catmullrom', .04), 20, .013, 6, false)
-    })
+    const path = slingBolt(side === 0 ? SLINGS.left : SLINGS.right, 0.86).map(([px, pz]) => new Vector3(px, .236, pz))
+    return [new TubeGeometry(new CatmullRomCurve3(path, false, 'catmullrom', .04), 40, .013, 6, false)]
   }, [side])
   useEffect(() => () => { geometry.dispose(); lightning.forEach(g => g.dispose()) }, [geometry, lightning])
   useFrame(() => {
@@ -329,11 +319,11 @@ function Inserts({ game }: { game: SpaceCadetGame }) {
     shape,
     inserts: INSERTS.filter(insert => insert.shape === shape),
     geometry: insertGeometry(shape, .3),
-  })), [])
+  })), [INSERTS])
   const meshes = useRef<(InstancedMesh | null)[]>([])
   const haloMesh = useRef<InstancedMesh>(null)
   const haloTexture = useMemo(createLampHaloTexture, [])
-  const colors = useMemo(() => INSERTS.map(insert => new Color(insert.color)), [])
+  const colors = useMemo(() => INSERTS.map(insert => new Color(insert.color)), [INSERTS])
   const batchColors = useMemo(() => batches.map(batch => batch.inserts.map(insert => new Color(insert.color))), [batches])
   const tint = useMemo(() => new Color(), [])
   useEffect(() => () => { batches.forEach(batch => batch.geometry.dispose()); haloTexture.dispose() }, [batches, haloTexture])
@@ -527,7 +517,7 @@ export function SpaceCadetTable({ game }: { game: SpaceCadetGame }) {
       <Inserts game={game} />
       <LaunchDeck game={game} />
       <LaunchRamp />
-      <OrbitCanopy />
+      <HyperspaceChute />
       <TargetShields />
       <Kickers game={game} />
       <CenterPost game={game} />

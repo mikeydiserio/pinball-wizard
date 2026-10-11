@@ -50,7 +50,63 @@ export const SLINGS = {
   right: [[1.75, 2.4], [1.75, 3.6], [1.1, 4.05]] as const,
 }
 
-export const REENTRY_DIVIDERS = [-0.25, 0.35, 0.95, 1.55] as const
+/** Lightning on each sling cap as (t down the median from the top post, lateral across it), centered on the incenter. */
+const SLING_BOLT = [[.38, -.06], [.56, -.27], [.59, .13], [.77, -.3], [.8, .12], [.95, -.08]] as const
+/** Bolt path for a sling, inset toward the centroid like the raised cap; barycentric layout mirrors it for the right side. */
+export function slingBolt([top, bottom, inner]: readonly Vec2[], inset = 1): Vec2[] {
+  const cx = (top[0] + bottom[0] + inner[0]) / 3, cz = (top[1] + bottom[1] + inner[1]) / 3
+  return SLING_BOLT.map(([t, lateral]) => {
+    const b = t * (.5 - lateral), c = t * (.5 + lateral), a = 1 - b - c
+    const px = a * top[0] + b * bottom[0] + c * inner[0], pz = a * top[1] + b * bottom[1] + c * inner[1]
+    return [cx + (px - cx) * inset, cz + (pz - cz) * inset]
+  })
+}
+
+/** Red lightning lane toward the hyperspace chute (30). `u` runs along its axis from the tail, `v` across it (positive to the right). */
+const LANE_ORIGIN: Vec2 = [0.74, 0.98]
+export const LANE_DIR: Vec2 = (() => { const l = Math.hypot(.9, -2.06); return [.9 / l, -2.06 / l] })()
+export const hyperspaceLane = (u: number, v = 0): Vec2 =>
+  [LANE_ORIGIN[0] + LANE_DIR[0] * u - LANE_DIR[1] * v, LANE_ORIGIN[1] + LANE_DIR[1] * u + LANE_DIR[0] * v]
+/** Inverse of `hyperspaceLane`: a playfield point in lane coordinates. */
+export function laneCoords(x: number, z: number): Vec2 {
+  const dx = x - LANE_ORIGIN[0], dz = z - LANE_ORIGIN[1]
+  return [dx * LANE_DIR[0] + dz * LANE_DIR[1], dz * LANE_DIR[0] - dx * LANE_DIR[1]]
+}
+
+/** Uniform Catmull-Rom samples through control points, shared by renderer and physics. */
+function smoothPath(control: readonly Vec3[], steps = 16): Vec3[] {
+  return control.slice(0, -1).flatMap((p1, i) => {
+    const p0 = control[Math.max(0, i - 1)], p2 = control[i + 1], p3 = control[Math.min(control.length - 1, i + 2)]
+    return Array.from({ length: steps }, (_, j): Vec3 => {
+      const t = j / steps
+      return [0, 1, 2].map(k => 0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t * t + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t * t * t)) as unknown as Vec3
+    })
+  }).concat([control[control.length - 1]])
+}
+
+/**
+ * Hyperspace chute (30): a shot from the red lane follows the right orbit to the hooded kickout (27).
+ */
+/** The chute mouth narrows from the broad cross-shot lane into the right orbit. */
+const FUNNEL_START = 1.95, FUNNEL_END = 2.6, FUNNEL_OPEN = .72, CHUTE_HALF_WIDTH = .29
+/** True when a ball at lane coordinates (u, v) is inside the funnel or the chute's mouth. */
+export function inHyperspaceMouth(u: number, v: number): boolean {
+  if (u < FUNNEL_START + .1 || u > 2.85) return false
+  const t = Math.min(1, (u - FUNNEL_START) / (FUNNEL_END - FUNNEL_START))
+  return Math.abs(v) < FUNNEL_OPEN + (CHUTE_HALF_WIDTH - FUNNEL_OPEN) * t - BALL_RADIUS * .5
+}
+const laneAt = (u: number, y: number): Vec3 => { const [x, z] = hyperspaceLane(u); return [x, y, z] }
+export const HYPERSPACE_CHUTE: readonly Vec3[] = smoothPath([
+  laneAt(2.2, 0), laneAt(2.95, .16),
+  [2.12, .38, -2.05], [2.38, .52, -2.62], [2.52, .56, -3.25],
+  [2.48, .54, -3.78], [2.28, .42, -4.28], [2.2, .3, -4.55],
+], 12)
+export const HYPERSPACE_CHUTE_WIDTH = .5
+/** The kickout is hooded; the playfield can only bounce off it. It sits right under the chute's end, tucked out of the open playfield. */
+export const HYPERSPACE_HOOD = { x: 2.2, z: -4.55, radius: .22 } as const
+export const REENTRY_DIVIDERS = [-0.55, 0.05, 0.65, 1.25] as const
+/** Center of each re-entry lane, shared by its rollover switch and lane light. */
+export const REENTRY_LANES = REENTRY_DIVIDERS.slice(1).map((x, i) => (x + REENTRY_DIVIDERS[i]) / 2)
 
 export const SEGMENTS: readonly Segment[] = [
   // Cabinet walls and the sweeping top arc.
@@ -129,9 +185,7 @@ export const DROPS = [
 
 export type RolloverKind = 'reentry' | 'spaceWarp' | 'bonus' | 'return' | 'out' | 'fuel' | 'engine' | 'skill'
 export const ROLLOVERS = [
-  { kind: 'reentry', x: .05, z: -4.78, radius: .24 },
-  { kind: 'reentry', x: .65, z: -4.78, radius: .24 },
-  { kind: 'reentry', x: 1.25, z: -4.78, radius: .24 },
+  ...REENTRY_LANES.map(x => ({ kind: 'reentry' as const, x, z: -4.78, radius: .24 })),
   { kind: 'spaceWarp', x: -3.22, z: -4.2, radius: .24 },
   { kind: 'out', x: -3.19, z: 3.6, radius: .24 },
   { kind: 'bonus', x: -2.565, z: 2.65, radius: .24 },
@@ -152,7 +206,7 @@ export const SPINNERS = [
 export type SaucerKind = 'hyperspace' | 'blackHole' | 'escape'
 /** Kickout holes: hyperspace kickout (27), black hole kickout (9), escape chute (42). */
 export const SAUCERS = [
-  { kind: 'hyperspace', x: 2.05, z: -4.65, radius: 0.32, eject: [-2.6, 3.4] as Vec2 },
+  { kind: 'hyperspace', x: HYPERSPACE_HOOD.x, z: HYPERSPACE_HOOD.z, radius: HYPERSPACE_HOOD.radius, eject: [-3.0, 3.1] as Vec2 },
   { kind: 'blackHole', x: -1.7, z: -1.0, radius: 0.2, eject: [7, -1.8] as Vec2 },
   { kind: 'escape', x: 2.45, z: 1.0, radius: 0.2, eject: [2.5, -14] as Vec2 },
 ] as const satisfies readonly { kind: SaucerKind; x: number; z: number; radius: number; eject: Vec2 }[]
@@ -204,18 +258,7 @@ const RAMP_CONTROL: readonly Vec3[] = [
   [-2.92, DECK_Y, -0.6], [-2.57, DECK_Y, -0.4],
 ]
 // Sample once: renderer and physics use exactly the same smooth centerline.
-export const RAMP_PATH: readonly Vec3[] = RAMP_CONTROL.slice(0, -1).flatMap((p1, i) => {
-  const p0 = RAMP_CONTROL[Math.max(0, i - 1)], p2 = RAMP_CONTROL[i + 1], p3 = RAMP_CONTROL[Math.min(RAMP_CONTROL.length - 1, i + 2)]
-  return Array.from({ length: 16 }, (_, j): Vec3 => {
-    const t = j / 16
-    return [0, 1, 2].map(k => 0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t * t + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t * t * t)) as unknown as Vec3
-  })
-}).concat([RAMP_CONTROL[RAMP_CONTROL.length - 1]])
-/** Right orbit canopy, with open windows and a clear ground-level passage. */
-export const ORBIT_CANOPY: readonly Vec3[] = [
-  [1.43, .62, -4.95], [1.8, .62, -4.63], [2.17, .62, -4.12],
-  [2.36, .62, -3.45], [2.38, .62, -2.75], [2.2, .62, -2.02], [1.92, .62, -1.28],
-]
+export const RAMP_PATH: readonly Vec3[] = smoothPath(RAMP_CONTROL)
 
 export const DRAIN_Z = 6.05
 export const OUTLANE_DRAIN_Z = 5.0
@@ -227,7 +270,7 @@ export type LightKey =
   | 'extraBall' | 'bonusLane' | 'returnLane' | 'outLane' | 'kicker' | 'replay'
   | 'hyperspace' | 'hyperspaceKickout' | 'blackHole' | 'escape' | 'wormhole'
   | 'spaceWarpTarget' | 'medal' | 'maelstrom' | 'deployment' | 'booster'
-  | 'rank' | 'progress' | 'redeploy' | 'gravity' | 'wormholeExit' | 'flag' | 'deploymentArrow' | 'missionArrow' | 'centerPost'
+  | 'rank' | 'progress' | 'redeploy' | 'gravity' | 'wormholeExit' | 'flag' | 'deploymentArrow' | 'missionArrow' | 'centerPost' | 'bumper'
 export type InsertShape = 'circle' | 'arrow' | 'triangle' | 'rect' | 'cross' | 'ring'
 export interface Insert {
   light: LightKey
@@ -247,12 +290,28 @@ const row = (light: LightKey, center: Vec2, color: string, size = 0.075): Insert
   [-1, 0, 1].map((offset, index) => ({ light, index, x: center[0] + offset * 0.2, z: center[1] - offset * 0.104, shape: 'circle' as const, size, color }))
 const RAMP_MOUTH: Vec2 = [-1.52, 0.2]
 
+/** Lamp centers along the lane axis; the bolt's edges stay straight beside each lamp so they read as centered. */
+const LANE_LAMPS = [.42, .88, 1.34, 1.8] as const
+const LANE_HALF_WIDTH = .2
+export const HYPERSPACE_BOLT: readonly Vec2[] = ([
+  // Barbs sweep forward so the whole bolt reads as pointing up into the chute.
+  [-.3, -.04], [.18, LANE_HALF_WIDTH], [.56, LANE_HALF_WIDTH], [.8, LANE_HALF_WIDTH + .14], [.66, LANE_HALF_WIDTH],
+  [1.48, LANE_HALF_WIDTH], [1.72, LANE_HALF_WIDTH + .14], [1.58, LANE_HALF_WIDTH], [2.0, LANE_HALF_WIDTH], [2.3, .03],
+  [2.0, -LANE_HALF_WIDTH], [1.15, -LANE_HALF_WIDTH], [1.26, -LANE_HALF_WIDTH - .14], [1.03, -LANE_HALF_WIDTH], [.18, -LANE_HALF_WIDTH],
+] as const).map(([u, v]) => hyperspaceLane(u, v))
+const laneLamp = (index: number, light: LightKey, size: number, color: string, lampIndex?: number): Insert => {
+  const u = LANE_LAMPS[index]
+  const [x, z] = hyperspaceLane(u)
+  return { light, index: lampIndex, x, z, shape: 'arrow', size, color, toward: hyperspaceLane(u + 1) }
+}
+
 export const INSERTS: readonly Insert[] = [
   { light: 'centerPost', x: CENTER_POST.x, z: CENTER_POST.z - .25, shape: 'circle', size: .07, color: '#ff4141' },
+  ...BUMPERS.map((b, index): Insert => ({ light: 'bumper', index, x: b.x, z: b.z, shape: 'ring', size: b.radius + .13, color: b.kind === 'attack' ? '#4d8bff' : '#59ff8c' })),
   // Blue mission arrows follow the current objective, including each Secret wormhole.
   ...([[-1.15, .9, -1.52, .2], [.65, -4.1, .65, -4.8], [.35, -1.4, .2, -3],
     [-.45, -.7, -.18, -1.34], [-2.3, -2.1, -2.78, -2.95], [2, -2.3, 2.55, -3.2],
-    [1.62, -.85, 2.05, -4.65], [-1.25, -.5, -1.7, -1], [-2.96, .55, -3.22, -.5],
+    [...hyperspaceLane(LANE_LAMPS[3]), ...hyperspaceLane(LANE_LAMPS[3] + 1)], [-1.25, -.5, -1.7, -1], [-2.96, .55, -3.22, -.5],
     [-3.0, -3.75, -3.22, -4.2], [-2.0, -4.6, -2.55, -5.25], [-3.15, 2.9, -3.19, 3.6],
     [2.45, 2.7, 2.55, 3.6], [-2.4, 1.8, -2.8, .3], [-1.95, -2.8, -1.6, -3],
     [1.65, -3.5, 2, -3.65], [1.65, 2.0, 2.05, 1.9], [1.95, -1.65, 2.7, -3.2],
@@ -288,8 +347,8 @@ export const INSERTS: readonly Insert[] = [
   { light: 'replay', x: -0.95, z: 3.62, shape: 'rect', size: 0.12, color: '#4d8bff' },
   { light: 'redeploy', x: 0.45, z: 3.62, shape: 'rect', size: 0.12, color: '#58ff7a' },
   // Re-entry lane lights (26) and the kickout / wormhole halos (3, 9, 27, 28, 41, 42).
-  ...[0.05, 0.65, 1.25].map((x, index): Insert => ({ light: 'reentry', index, x, z: -5.02, shape: 'circle', size: 0.075, color: '#ffe066' })),
-  ...SAUCERS.map((s): Insert => ({ light: s.kind === 'hyperspace' ? 'hyperspaceKickout' : s.kind, x: s.x, z: s.z, shape: 'ring', size: s.kind === 'hyperspace' ? 0.39 : 0.29, color: s.kind === 'hyperspace' ? '#b56bff' : s.kind === 'blackHole' ? '#ff9f1a' : '#3ad7ff' })),
+  ...REENTRY_LANES.map((x, index): Insert => ({ light: 'reentry', index, x, z: -5.02, shape: 'circle', size: 0.075, color: '#ffe066' })),
+  ...SAUCERS.map((s): Insert => ({ light: s.kind === 'hyperspace' ? 'hyperspaceKickout' : s.kind, x: s.x, z: s.z, shape: 'ring', size: s.kind === 'hyperspace' ? HYPERSPACE_HOOD.radius + .07 : 0.29, color: s.kind === 'hyperspace' ? '#b56bff' : s.kind === 'blackHole' ? '#ff9f1a' : '#3ad7ff' })),
   ...WORMHOLES.map((w, index): Insert => ({ light: 'wormhole', index, x: w.x, z: w.z, shape: 'ring', size: 0.32, color: w.color })),
   // Right side: hyperspace (31), space warp target (34), medals (35), reflex (36), time warp (37), maelstrom (38).
   ...Array.from({ length: 4 }, (_, index): Insert => {
@@ -298,9 +357,9 @@ export const INSERTS: readonly Insert[] = [
   }),
   { light: 'spaceWarpTarget', x: 1.45, z: -1.62, shape: 'circle', size: 0.065, color: '#b56bff' },
   ...DROPS.slice(3, 6).map((t, index): Insert => ({ light: 'medal', index, x: t.x, z: t.z + 0.32, shape: 'circle', size: 0.07, color: '#ffd23f' })),
-  { light: 'reflex', index: 1, x: 1.55, z: -0.75, shape: 'arrow', size: 0.14, color: '#ff8c2a', toward: [2.05, -4.65] },
-  { light: 'timeWarp', x: 1.35, z: -0.33, shape: 'arrow', size: 0.14, color: '#59ff8c', toward: [2.05, -4.65] },
-  { light: 'maelstrom', x: 1.12, z: 0.1, shape: 'arrow', size: 0.15, color: '#3ad7ff', toward: [GRAVITY_WELL.x, GRAVITY_WELL.z] },
+  laneLamp(2, 'reflex', 0.14, '#ff8c2a', 1),
+  laneLamp(1, 'timeWarp', 0.14, '#59ff8c'),
+  laneLamp(0, 'maelstrom', 0.15, '#3ad7ff'),
   // Deployment lights (39) in the chute and booster target lights (40).
   ...Array.from({ length: 6 }, (_, index): Insert => ({ light: 'deployment', index, x: SERVE.x, z: 4.25 - index * 0.62, shape: 'triangle', size: 0.08, color: '#ff8c2a', toward: [SERVE.x, -6] })),
   ...Array.from({length: 4}, (_, index): Insert => ({ light: 'booster', index, x: 2.38, z: -.05 - index * .34, shape: 'circle', size: 0.065, color: '#3ad7ff' })),

@@ -28,4 +28,4 @@ export interface TableGame {
   nudge(): void
 }
 
-export type BoardId = 'orbital' | 'cadet'
+export type BoardId = 'orbital' | 'cadet' | 'volcano'
